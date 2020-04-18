@@ -1,0 +1,147 @@
+"""
+Roberta model
+"""
+
+from reflex.utils import chunks
+from fairseq.models.roberta import RobertaModel
+import torch
+
+class Roberta():
+    def __init__(self, model_dir, model_name, device):
+        self.model = RobertaModel.from_pretrained(model_dir, checkpoint_file=model_name)
+        self.model.to(device=device)
+        self.device = device
+        self.bpe = self.model.bpe
+        self.task = self.model.task
+        self.max_sentence_length = 256
+        self.cosine_similarity = torch.nn.CosineSimilarity(dim=0)
+        self.mask = "<mask>" 
+        self.start_sentence = "<s>"
+        self.period = '.'
+
+    def update_batch(self, batch, new_toks):
+        tens, mask_idxs = batch
+        # Update the batch
+        batch_list = []
+        for ind, tok in enumerate(new_toks):
+            mask_idx = mask_idxs[ind][0][0]
+            t = tens[ind].squeeze()
+            right_len = t.shape[0] - mask_idx - 1
+            l, r = torch.split(t, [mask_idx+1, right_len], dim=0)
+            l[mask_idx] = tok
+            new_t = torch.cat([l, torch.IntTensor([self.get_mask()]), r])
+            batch_list.append(new_t)
+            mask_idxs[ind] += 1
+        new_batch = torch.stack(batch_list)
+        return (new_batch, mask_idxs)
+
+    def end_seq_condition(self, token):
+        return token == self.task.source_dictionary.eos() or token == self.period
+
+    def decode_lm(self, batch, cap):
+        i = 0
+        # maintain batch state in this list. Finish decoding when all states have been flipped
+        eos_state = [False] * len(batch[1])
+        while True:
+            if i == 0:
+                results = self.decode_naive(batch)
+                token_list = [[self.get_bpe_val(r)] for r in results]
+                batch = self.update_batch(batch, results)
+                i += 1
+            else:
+                results = self.decode_naive(batch)
+                for ind, t in enumerate(token_list):
+                    new_tok = self.get_bpe_val(results[ind])
+                    if self.end_seq_condition(new_tok):
+                        eos_state[ind] = True
+                    t.append(new_tok)
+                    # Going to cap at cap inferences. Nothing in any of the datasets is larger than 20 subwords so EM and F1 will be approx 0.
+                if False not in eos_state or i > cap:
+                    break
+                i += 1
+
+        final_strings = []
+        for tl in token_list:
+            if self.end_seq_condition(tl[-1]):
+                tl = tl[:-1]
+            final_strings.append(''.join(tl))
+        return final_strings
+
+    def encode_context(self, context, text_spans_bpe):
+        context_spans = self.bpe.encode(context)
+        text_spans_context = f'{self.start_sentence} {context_spans} {text_spans_bpe}'
+        context_encoded = self.task.source_dictionary.encode_line(text_spans_context, append_eos=True)
+        return context_encoded
+
+    def process_context(self, context, text_spans_bpe, t):
+        if context is None:
+            text_spans_bpe = f'{self.start_sentence} {text_spans_bpe}'
+            encoded = self.task.source_dictionary.encode_line(
+                text_spans_bpe, append_eos=True
+            )
+            return encoded
+        context = context.rstrip()
+        context_encoded = self.encode_context(context, text_spans_bpe)
+        while len(context_encoded) > t:
+            # For now, we prune the context
+            context = context[:-10]
+            context_encoded = self.encode_context(context, text_spans_bpe)
+
+    def get_mask(self):
+        return self.task.source_dictionary.index(self.mask)
+
+
+    def batch(self, samples, bsz):
+        encoded_list = []
+        for s in samples:
+            sample = s.template.replace('[X]', s.head)
+            sample = sample.replace('[Y]', self.mask)
+            text_spans = sample.split(self.mask)
+            text_spans_bpe = f' {self.mask} '.join([self.bpe.encode(ts.rstrip()) for ts in text_spans])
+            encoded = self.process_context(s.context, text_spans_bpe, 500)
+            masked_idx = (encoded == self.get_mask()).nonzero().numpy()
+            encoded_list.append((encoded, masked_idx))
+        # sort by length of encoded
+        encoded_list.sort(key=lambda x: len(x[0]))
+        batches = []
+        for batch in chunks(encoded_list, bsz):
+            max_len = len(max(batch, key=lambda x: len(x[0]))[0])
+            # Pad the batch according to the max length in the sequence
+            encs = []
+            idxs = []
+            for encoded, masked_idx in batch:
+                if len(encoded) < max_len:
+                    pad_len = max_len - len(encoded)
+                    pad = torch.full([pad_len], self.task.source_dictionary.pad(), dtype=torch.int)
+                    encoded = torch.cat([encoded, pad])
+                encs.append(encoded)
+                idxs.append(masked_idx)
+            batches.append((torch.stack(encs), idxs))
+        return batches
+
+    def get_bpe_val(self, ind):
+        bpe = self.task.source_dictionary[ind]
+        val = self.bpe.decode(bpe)
+        return val
+
+    def decode_naive(self, batch):
+        tens, idxs = batch
+        with torch.no_grad():
+            self.model.eval()
+            self.model.model.eval()
+            log_probs, extra = self.model.model(
+                tens.long().to(device=self.device),
+                features_only=False,
+                return_all_hiddens=False,
+            )
+
+        results = []
+        for ind, log_prob in enumerate(log_probs):
+            masked_idx = idxs[ind]
+            log_prob = log_prob.squeeze()
+            mask_probs = log_prob[masked_idx].squeeze()
+            decode_ind = torch.argmax(mask_probs, dim=0)
+            results.append(decode_ind)
+            
+        return results
+
