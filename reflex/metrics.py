@@ -10,8 +10,7 @@ import re
 import string
 import collections
 
-
-def calculate_relation_metrics(samples, predictions, per_relation_metrics, relation)
+def calculate_relation_metrics(samples, predictions, per_relation_metrics, relation):
     relation_em = relation_f1 = 0
     for sample, prediction in zip(samples, predictions):
         em, f1 = calculate_em_f1(sample.tail, prediction)
@@ -21,7 +20,6 @@ def calculate_relation_metrics(samples, predictions, per_relation_metrics, relat
     relation_f1 /= len(samples)
     per_relation_metrics[relation['relation']] = {'em': relation_em, 'f1': relation_f1}
     return relation_em, relation_f1, per_relation_metrics
-
 
 def _print_top_k(value_max_probs, index_max_probs, vocab, mask_topk, index_list, max_printouts = 10):
     result = []
