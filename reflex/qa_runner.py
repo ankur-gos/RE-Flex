@@ -23,7 +23,8 @@ def to_list(tensor):
     return tensor.detach().cpu().tolist()
 
 class QARunner:
-    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device):
+    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device, trained_to_reject):
+        self.trained_to_reject = trained_to_reject
         self.qa_path = qa_path # path to qa weights
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
@@ -109,7 +110,7 @@ class QARunner:
             predictions = get_predictions(examples, features, all_results, n_best,
                 max_answer_length, do_lower_case,
                 verbose_logging,
-                v2, null_score_diff_threshold, must_choose_answer=self.must_choose_answer)
+                self.trained_to_reject, null_score_diff_threshold, must_choose_answer=self.must_choose_answer)
             predictions = [predictions[p] for p in predictions]
             relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, predictions, per_relation_metrics, relation)
             aggregate_em += relation_em

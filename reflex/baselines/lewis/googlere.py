@@ -17,10 +17,11 @@ def conf():
     batch_size = 16
     must_choose_answer = True
     device = 'cpu'
+    trained_to_reject = False
 
 @ex.automain
-def main(qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device):
-    runner = QARunner(qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device)
+def main(qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device, trained_to_reject):
+    runner = QARunner(qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device, trained_to_reject)
     em, f1, per_relation_metrics = runner.predict()
     return {'em': em, 'f1': f1, 'per_relation_metrics': per_relation_metrics}
 
