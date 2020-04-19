@@ -3,15 +3,10 @@ Experiment configuration for:
 Model: Lewis et al 2019 -- https://arxiv.org/abs/1906.04980
 Benchmark: T-REx
 """
-from sacred import Experiment
-from sacred.observers import MongoObserver, SlackObserver
 from reflex.qa_runner import QARunner
-mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'
-ex = Experiment('Lewis T-REx')
-ex.observers.append(MongoObserver(url=mongo_uri,
-                                      db_name='sacred'))
-slack_obs = SlackObserver.from_config('/Users/ankur/configs/slack.json')
-ex.observers.append(slack_obs)
+from reflex.utils import setup_experiment
+
+ex = setup_experiment('Lewis T-REx')
 
 @ex.config
 def conf():

@@ -3,15 +3,10 @@ Experiment configuration for:
 Model: Radford Roberta (Naive w/ context seed)
 Benchmark: T-REx
 """
-from sacred import Experiment
-from sacred.observers import MongoObserver, SlackObserver
 from reflex.lm_runner import LMRunner
-mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'
-ex = Experiment('Radford T-REx')
-ex.observers.append(MongoObserver(url=mongo_uri,
-                                      db_name='sacred'))
-slack_obs = SlackObserver.from_config('/Users/ankur/configs/slack.json')
-ex.observers.append(slack_obs)
+from reflex.utils import setup_experiment
+
+ex = setup_experiment('Radford T-REx')
 
 @ex.config
 def conf():

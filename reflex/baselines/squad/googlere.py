@@ -3,15 +3,10 @@ Experiment configuration for:
 Model: BERT trained squad
 Benchmark: Google-RE
 """
-from sacred import Experiment
-from sacred.observers import MongoObserver, SlackObserver
 from reflex.qa_runner import QARunner
-mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'
-ex = Experiment('BERT Squad2.0 GoogleRE')
-ex.observers.append(MongoObserver(url=mongo_uri,
-                                      db_name='sacred'))
-slack_obs = SlackObserver.from_config('/Users/ankur/configs/slack.json')
-ex.observers.append(slack_obs)
+from reflex.utils import setup_experiment
+
+ex = setup_experiment('BERT Squad2.0 GoogleRE')
 
 @ex.config
 def conf():
