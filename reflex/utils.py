@@ -6,7 +6,7 @@ import os
 
 def setup_experiment(experiment_name):
     mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'
-    ex = Experiment(experiment_name)
+    ex = Experiment(experiment_name, save_git_info=False)
     ex.observers.append(MongoObserver(url=mongo_uri,
                                           db_name='sacred'))
     slack_obs = SlackObserver.from_config(os.environ['SLACK_CONFIG'])
