@@ -23,12 +23,15 @@ def to_list(tensor):
     return tensor.detach().cpu().tolist()
 
 class QARunner:
-    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer):
+    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device):
         self.qa_path = qa_path # path to qa weights
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
         self.tokenizer = BertTokenizer.from_pretrained('bert-large-cased') # tokenizer
         self.model = BertForQuestionAnswering.from_pretrained(qa_path) # Load the model
+        self.model.to(device)
+        self.device = device
+
         self.batch_size = batch_size
         self.must_choose_answer = must_choose_answer # For datasets where there is always an answer, setting this to true will ensure that QA models that can return "answer doesn't exist" will always return a span in the context
 
@@ -86,10 +89,7 @@ class QARunner:
             all_results = []
             for batch in tqdm(eval_dataloader, desc="Evaluating"):
                 #stime = time.time()
-                if torch.cuda.is_available():
-                    batch = tuple(t.cuda() for t in batch)
-                else:
-                    batch = tuple(t for t in batch)
+                batch = tuple(t.to(device=self.device) for t in batch)
                 with torch.no_grad():
                     inputs = {'input_ids':      batch[0],
                               'attention_mask': batch[1]
