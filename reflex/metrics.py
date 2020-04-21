@@ -9,6 +9,24 @@ import numpy as np
 import re
 import string
 import collections
+import pandas as pd
+
+def calculate_final_em_f1(per_relation_metricss):
+    final_per_relation_metrics = {}
+    for per_relation_metrics in per_relation_metricss:
+        for relation in per_relation_metrics:
+            if relation not in final_per_relation_metrics:
+                final_per_relation_metrics[relation] = per_relation_metrics[relation]
+                continue
+            else:
+                # report metrics for best lambda per relation
+                if final_per_relation_metrics[relation]['f1'] < per_relation_metrics[relation]['f1']:
+                    final_per_relation_metrics[relation] = per_relation_metrics[relation]
+
+    final_em = np.average(np.array([final_per_relation_metrics[s]['em'] for s in final_per_relation_metrics]))
+    final_f1 = np.average(np.array([final_per_relation_metrics[s]['f1'] for s in final_per_relation_metrics]))
+    return final_em, final_f1, final_per_relation_metrics
+
 
 def calculate_relation_metrics(samples, predictions, per_relation_metrics, relation):
     relation_em = relation_f1 = 0

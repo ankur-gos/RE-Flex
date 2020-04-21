@@ -160,9 +160,11 @@ class Reflex():
             text_spans_bpe = f' {self.mask} '.join([self.bpe.encode(ts.rstrip()) for ts in text_spans])
             encoded, context_length, spacy_tokens, alignment = self.process_context(s.context, text_spans_bpe, 500)
             masked_idx = (encoded == self.get_mask()).nonzero().numpy()
-            encoded_list.append((encoded, masked_idx, context_length, spacy_tokens, alignment))
+            encoded_list.append(((encoded, masked_idx, context_length, spacy_tokens, alignment), s))
         # sort by length of encoded
-        encoded_list.sort(key=lambda x: len(x[0]))
+        encoded_list.sort(key=lambda x: len(x[0][0]))
+        # Since we reordered the samples list, we need the original sample list reordered as well for computing ground truth
+        encoded_list, samples = zip(*encoded_list)
         batches = []
         for batch in chunks(encoded_list, bsz):
             max_len = len(max(batch, key=lambda x: len(x[0]))[0])
@@ -183,7 +185,7 @@ class Reflex():
                 alignments.append(alignment)
                 spacy_tokenss.append(spacy_tokens)
             batches.append((torch.stack(encs), idxs, context_lengths, spacy_tokenss, alignments))
-        return batches
+        return batches, samples
 
     def get_bpe_val(self, ind):
         bpe = self.task.source_dictionary[ind]

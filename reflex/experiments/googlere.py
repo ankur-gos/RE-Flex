@@ -3,29 +3,37 @@ Experiment configuration for:
 Model: RE-Flex
 Benchmark: Google-RE
 """
-from sacred import Experiment
-from sacred.observers import MongoObserver, SlackObserver
+import fasttext
+import spacy
 from reflex.reflex_runner import ReflexRunner
-mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'
-ex = Experiment('RE-Flex GoogleRE')
-ex.observers.append(MongoObserver(url=mongo_uri,
-                                      db_name='sacred'))
-slack_obs = SlackObserver.from_config('/Users/ankur/configs/slack.json')
-ex.observers.append(slack_obs)
+from reflex.utils import setup_experiment
+from reflex.metrics import calculate_final_em_f1
+import os
+
+ex = setup_experiment('RE-Flex Google-RE')
 
 @ex.config
 def conf():
-    model_dir = '/Users/ankur/Projects/RE-Flex/weights/roberta_large' # Path to trained weights
-    model_name = '/Users/ankur/Projects/RE-Flex/weights/roberta_large/model.pt'
-    relations_filepath = '/Users/ankur/Projects/RE-Flex/data/googlere_relations.jsonl' # Path to relations file
-    data_directory = '/Users/ankur/Projects/RE-Flex/data/Google_RE2' # Path to underlying data
+    model_dir = os.path.join(os.environ['BASE_PATH'], 'weights/roberta_large') # Path to trained weights
+    model_name = os.path.join(os.environ['BASE_PATH'], 'weights/roberta_large/model.pt')
+    relations_filepath = os.path.join(os.environ['BASE_PATH'], 'data/googlere_relations.jsonl') # Path to relations file
+    data_directory = os.path.join(os.environ['BASE_PATH'], 'data/GoogleRE') # Path to underlying data
     batch_size = 16
     must_choose_answer = True
     device = 'cpu'
+    ls = [-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3]
+    k = 16
+    word_embeddings_path = os.path.join(os.environ['BASE_PATH'], 'weights/crawl-300d-2M-subword.bin')
 
 @ex.automain
-def main(model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer):
-    runner = ReflexRunner(model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer)
-    em, f1, per_relation_metrics = runner.predict()
+def main(model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer, word_embeddings_path, ls,  k):
+    spacy_model = spacy.load('en_core_web_lg')
+    we_model = fasttext.load_model(word_embeddings_path)
+    per_relation_metricss = []
+    for l in ls:
+        runner = ReflexRunner(model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer, l, we_model, spacy_model, k)
+        em, f1, per_relation_metrics = runner.predict()
+        per_relation_metricss.append(per_relation_metrics)
+    em, f1, per_relation_metrics = calculate_final_em_f1(per_relation_metricss)
     return {'em': em, 'f1': f1, 'per_relation_metrics': per_relation_metrics}
 

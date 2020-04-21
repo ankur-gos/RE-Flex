@@ -100,9 +100,10 @@ class Roberta():
             text_spans_bpe = f' {self.mask} '.join([self.bpe.encode(ts.rstrip()) for ts in text_spans])
             encoded = self.process_context(s.context, text_spans_bpe, 500)
             masked_idx = (encoded == self.get_mask()).nonzero().numpy()
-            encoded_list.append((encoded, masked_idx))
+            encoded_list.append(((encoded, masked_idx), s))
         # sort by length of encoded
-        encoded_list.sort(key=lambda x: len(x[0]))
+        encoded_list.sort(key=lambda x: len(x[0][0]))
+        encoded_list, samples = zip(*encoded_list)
         batches = []
         for batch in chunks(encoded_list, bsz):
             max_len = len(max(batch, key=lambda x: len(x[0]))[0])
@@ -117,7 +118,7 @@ class Roberta():
                 encs.append(encoded)
                 idxs.append(masked_idx)
             batches.append((torch.stack(encs), idxs))
-        return batches
+        return batches, samples
 
     def get_bpe_val(self, ind):
         bpe = self.task.source_dictionary[ind]

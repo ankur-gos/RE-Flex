@@ -42,7 +42,7 @@ class LMRunner:
             samples = list(samples)
             print(f'Loaded relation {relation["relation"]}. There are {len(samples)} test samples')
             print('Batching samples')
-            batches = self.model.batch(samples, self.batch_size)
+            batches, samples = self.model.batch(samples, self.batch_size)
             all_results = []
             for batch in tqdm(batches):
                 results = self.model.decode_lm(batch, 20)

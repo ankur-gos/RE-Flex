@@ -25,9 +25,10 @@ class ReflexRunner:
                  batch_size, 
                  must_choose_answer, 
                  l, 
-                 word_embeddings_bin_path,
+                 we_model,
+                 spacy_model,
                  k):
-        self.context_filter = WordEmbeddingsPMIFilter(word_embeddings_bin_path, l)
+        self.context_filter = WordEmbeddingsPMIFilter(we_model, spacy_model, l)
         self.model = Reflex(model_dir, model_name, device, k, self.context_filter.nlp)
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
@@ -44,25 +45,38 @@ class ReflexRunner:
             data_file = os.path.join(self.data_directory, relation['relation']) + '.jsonl'
             data = load_file(data_file)
             # Adding to set filters any accidental duplicates
-            samples = set()
+            samples_set = set()
             for d in data:
-                samples.add(Sample(d['subject'], d['context'], d['object'], None, relation['template']))
+                samples_set.add(Sample(d['subject'], d['context'], d['object'], None, relation['template']))
 
-            samples = list(samples)
+            samples = list(samples_set)
             init_len = len(samples)
-            print('Starting filtering')
-            samples = self.context_filter.filter(samples)
-            final_len = len(samples)
-            print(f'Filtering finished. Filtered {init_len - final_len}.')
+            if self.must_choose_answer:
+                print('Must choose answer is True. Skipping filtering step')
+            else:
+                print('Starting filtering')
+                samples = self.context_filter.filter(samples)
+                final_len = len(samples)
+                print(f'Filtering finished. Filtered {init_len - final_len}.')
             
-            print(f'Loaded relation {relation["relation"]}. There are {len(samples)} test samples')
-            print('Batching samples')
-            batches = self.model.batch(samples, self.batch_size)
-            print('Starting inference')
             all_results = []
-            for batch in tqdm(batches):
-                results = self.model.predict(batch)
-                all_results.extend(results)
+            if final_len != 0:
+                print(f'Loaded relation {relation["relation"]}. There are {len(samples)} test samples')
+                print('Batching samples')
+                batches, samples = self.model.batch(samples, self.batch_size)
+                print('Starting inference')
+                for batch in tqdm(batches):
+                    results = self.model.predict(batch)
+                    all_results.extend(results)
+            else:
+                print('All samples were filtered. Skipping inference.')
+            # Now we need to readd all the filtered samples
+            filtered_samples = [s for s in samples_set if s not in samples]
+            samples = list(samples)
+            samples.extend(filtered_samples)
+            # Predict empty string for every sample
+            filtered_predictions = [''] * len(filtered_samples)
+            all_results.extend(filtered_predictions)
             relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, all_results, per_relation_metrics, relation)
             aggregate_em += relation_em
             aggregate_f1 += relation_f1

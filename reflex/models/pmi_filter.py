@@ -8,12 +8,12 @@ import json
 from collections import Counter
 
 class WordEmbeddingsPMIFilter:
-    def __init__(self, we_model_pth, lambda_val):
+    def __init__(self, we_model, spacy_model, lambda_val):
         print("Loading fastext word embeddings ... ")
-        self.word_emb = fasttext.load_model(we_model_pth)
+        self.word_emb = we_model
         self.filter_tokens = ['.', ',', '(', ')', '</s>', '_._', ':', '-', ',', '_..._', '_:_']
         print("Loading spacy model ... ")
-        self.nlp = spacy.load('en_core_web_lg')
+        self.nlp = spacy_model
         self.lambda_val = lambda_val
 
     def estimate_pmi(self, sample):
