@@ -14,11 +14,12 @@ class WordEmbeddingsPMIFilter:
         self.filter_tokens = ['.', ',', '(', ')', '</s>', '_._', ':', '-', ',', '_..._', '_:_']
         print("Loading spacy model ... ")
         self.nlp = spacy.load('en_core_web_lg')
-        self.lambda = lambda_val
+        self.lambda_val = lambda_val
 
     def estimate_pmi(self, sample):
         template = self.nlp(sample.template.strip())
         context = self.nlp(sample.context.strip())
+        scores = []
         for t in template:
             t_text = t.text
             max_score = 0
@@ -27,13 +28,13 @@ class WordEmbeddingsPMIFilter:
                 score = self.get_cosine_sim_score(self.word_emb[c_text], self.word_emb[t_text])
                 if score > max_score:
                     max_score = score
-            set_score.append(max_score)
-        return np.average(set_score)
+            scores.append(max_score)
+        return np.average(scores)
 
     def filter(self, samples):
         ms = np.asarray([self.estimate_pmi(s) for s in samples])
         mean, std = norm.fit(ms)
-        lower_bound = mean + self.lambda * std
+        lower_bound = mean + self.lambda_val * std
         zsamples = zip(samples, ms)
         filtered_samples = []
         for sample, m in zsamples:

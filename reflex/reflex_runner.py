@@ -5,23 +5,34 @@ import os
 import torch
 from torch.utils.data import (DataLoader, RandomSampler, SequentialSampler,
                               TensorDataset)
-from reflex.models.roberta import Roberta
+from reflex.models.reflex import Reflex
 from dataclasses import dataclass
 from reflex.utils import load_file, to_list
 from reflex.structs import Sample
+from reflex.models.pmi_filter import WordEmbeddingsPMIFilter
 from reflex.squad_utils import convert_examples_to_features, read_input_examples, RawResult, get_predictions
 from reflex.metrics import calculate_relation_metrics
 from tqdm import tqdm
 
 
 class ReflexRunner:
-    def __init__(self, model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer, l):
-        self.model = Roberta(model_dir, model_name, device)
+    def __init__(self, 
+                 model_dir, 
+                 model_name, 
+                 device, 
+                 relations_filepath, 
+                 data_directory, 
+                 batch_size, 
+                 must_choose_answer, 
+                 l, 
+                 word_embeddings_bin_path,
+                 k):
+        self.context_filter = WordEmbeddingsPMIFilter(word_embeddings_bin_path, l)
+        self.model = Reflex(model_dir, model_name, device, k, self.context_filter.nlp)
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
         self.batch_size = batch_size
         self.must_choose_answer = must_choose_answer # For datasets where there is always an answer, setting this to true will ensure that QA models that can return "answer doesn't exist" will always return a span in the context
-        self.context_filter = PMIFilter(l)
 
     def predict(self):
         # Load relations file
@@ -35,18 +46,22 @@ class ReflexRunner:
             # Adding to set filters any accidental duplicates
             samples = set()
             for d in data:
-                if use_context:
-                    samples.add(Sample(d['subject'], d['context'], d['object'], None, relation['template']))
-                else:
-                    samples.add(Sample(d['subject'], None, d['object'], None, relation['template']))
+                samples.add(Sample(d['subject'], d['context'], d['object'], None, relation['template']))
 
             samples = list(samples)
+            init_len = len(samples)
+            print('Starting filtering')
+            samples = self.context_filter.filter(samples)
+            final_len = len(samples)
+            print(f'Filtering finished. Filtered {init_len - final_len}.')
+            
             print(f'Loaded relation {relation["relation"]}. There are {len(samples)} test samples')
             print('Batching samples')
             batches = self.model.batch(samples, self.batch_size)
+            print('Starting inference')
             all_results = []
             for batch in tqdm(batches):
-                results = self.model.decode_lm(batch, 20)
+                results = self.model.predict(batch)
                 all_results.extend(results)
             relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, all_results, per_relation_metrics, relation)
             aggregate_em += relation_em
