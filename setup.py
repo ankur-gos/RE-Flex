@@ -19,6 +19,7 @@ setup(
         'gensim==3.8.1',
         'sacred==0.8.1',
         'pymongo==3.10.1',
-        'torch==1.2.0'
+        'torch==1.2.0',
+        'spacy==2.0.7'
     ]
 )
