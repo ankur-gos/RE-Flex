@@ -20,6 +20,7 @@ setup(
         'sacred==0.8.1',
         'pymongo==3.10.1',
         'torch==1.2.0',
-        'spacy==2.0.7'
+        'spacy==2.0.7',
+        'wrapt==1.10.11'
     ]
 )
