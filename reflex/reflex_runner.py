@@ -51,6 +51,7 @@ class ReflexRunner:
 
             samples = list(samples_set)
             init_len = len(samples)
+            final_len = 1
             if self.must_choose_answer:
                 print('Must choose answer is True. Skipping filtering step')
             else:

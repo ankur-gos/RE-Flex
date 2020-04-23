@@ -8,6 +8,7 @@ import torch
 import torch.nn.functional as F
 from spacy.tokenizer import Tokenizer
 from collections import defaultdict
+import numpy as np
 
 class Reflex():
     def __init__(self, model_dir, model_name, device, k, spacy_model):
@@ -36,12 +37,25 @@ class Reflex():
             context_length = context_lengths[ind]
             alignment = alignments[ind]
             spacy_tokens = spacy_tokenss[ind]
+            # Filter punctuation and stop words from D
+            valid_inds = []
+            for st_ind, tok in enumerate(spacy_tokens):
+                #if self.nlp.vocab[tok].is_stop or self.nlp.vocab[tok].is_punct:
+                #    continue
+                #if self.nlp.vocab[tok].is_punct:
+                #    continue
+                valid_inds.append(st_ind)
+
             mask_idx = mask_idxs[ind]
-            p_D = torch.zeros((len(spacy_tokens)), dtype=torch.float)
+            p_D = torch.zeros((len(valid_inds)), dtype=torch.float).to(device=self.device)
+            valid_inds = torch.from_numpy(np.array(valid_inds)).long().to(device=self.device)
             for p_ind, p_b in enumerate(p_B):
                 feat = features[p_ind].squeeze()
                 context_features = feat[:context_length, :] # num_spacy_tokens x C
                 context_features = self.align_features_to_words(context_features, alignment)[1:, :] # chop off the start sentence token
+                #import ipdb
+                #ipdb.set_trace()
+                context_features = torch.index_select(context_features, dim=0, index=valid_inds)
                 mask_features = feat[mask_idx].repeat(context_features.shape[0], 1)
                 p_D_given_b = F.cosine_similarity(context_features, mask_features, dim=1)
                 p_D_given_b = F.softmax(p_D_given_b, dim=0)
@@ -65,6 +79,7 @@ class Reflex():
     def align_bpe_to_words(self, bpe_tokens, other_tokens):
         # subroutine of fairseq.models.roberta.alignment_utils.align_bpe_to_words
         # create alignment from every word to a list of BPE tokens
+
         assert ''.join(bpe_tokens) == ''.join(other_tokens)
         alignment = []
         bpe_toks = filter(lambda item: item[1] != '', enumerate(bpe_tokens, start=1))
@@ -118,9 +133,15 @@ class Reflex():
         context_spans = self.bpe.encode(context)
         text_spans_context = f'{self.start_sentence} {context_spans}'
         context_encoded = self.task.source_dictionary.encode_line(text_spans_context, append_eos=False)
-        spacy_tokens = [t.text for t in self.tokenizer(context)]
-        decoded = [self.get_bpe_val(i).strip() for i in context_encoded[1:]]
-        # Reference: fairseq.models.alignment_utils.align_bpe_to_words
+        # Sometimes the source dictionary decodes the unicode differently than spacy
+        # so we use the decoded context instead of the original context
+        decoded = [self.get_bpe_val(i) for i in context_encoded[1:]]
+        decoded_context = ''.join(decoded)
+        decoded = [i.strip() for i in decoded]
+        spacy_tokens = [t.text.strip() for t in self.tokenizer(decoded_context)]
+        if ''.join(decoded) != ''.join(spacy_tokens):
+            import ipdb
+            ipdb.set_trace()
         alignment = self.align_bpe_to_words(decoded, spacy_tokens)
 
         return len(context_encoded), spacy_tokens, alignment

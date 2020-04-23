@@ -17,11 +17,11 @@ def conf():
     model_dir = os.path.join(os.environ['BASE_PATH'], 'weights/roberta_large') # Path to trained weights
     model_name = os.path.join(os.environ['BASE_PATH'], 'weights/roberta_large/model.pt')
     relations_filepath = os.path.join(os.environ['BASE_PATH'], 'data/googlere_relations.jsonl') # Path to relations file
-    data_directory = os.path.join(os.environ['BASE_PATH'], 'data/GoogleRE') # Path to underlying data
+    data_directory = os.path.join(os.environ['BASE_PATH'], 'data/Google_RE') # Path to underlying data
     batch_size = 16
     must_choose_answer = True
     device = 'cpu'
-    ls = [-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3]
+    ls = [0]
     k = 16
     word_embeddings_path = os.path.join(os.environ['BASE_PATH'], 'weights/crawl-300d-2M-subword.bin')
 
