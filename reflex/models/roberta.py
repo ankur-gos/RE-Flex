@@ -2,7 +2,7 @@
 Roberta model
 """
 
-from reflex.utils import chunks
+from reflex.utils import chunks, get_bpe_val
 from fairseq.models.roberta import RobertaModel
 import torch
 
@@ -36,7 +36,7 @@ class Roberta():
         return (new_batch, mask_idxs)
 
     def end_seq_condition(self, token):
-        return token == self.task.source_dictionary.eos() or token == self.period
+        return token == "</s>" or token == self.period
 
     def decode_lm(self, batch, cap):
         i = 0
@@ -45,26 +45,30 @@ class Roberta():
         while True:
             if i == 0:
                 results = self.decode_naive(batch)
-                token_list = [[self.get_bpe_val(r)] for r in results]
+                token_list = [[get_bpe_val(r, self.task.source_dictionary, self.bpe)] for r in results]
                 batch = self.update_batch(batch, results)
                 i += 1
             else:
+                if False not in eos_state or i > cap:
+                    break
                 results = self.decode_naive(batch)
                 for ind, t in enumerate(token_list):
-                    new_tok = self.get_bpe_val(results[ind])
+                    new_tok = get_bpe_val(results[ind], self.task.source_dictionary, self.bpe)
                     if self.end_seq_condition(new_tok):
                         eos_state[ind] = True
                     t.append(new_tok)
-                    # Going to cap at cap inferences. Nothing in any of the datasets is larger than 20 subwords so EM and F1 will be approx 0.
-                if False not in eos_state or i > cap:
-                    break
                 i += 1
 
+        #import ipdb
+        #ipdb.set_trace()
         final_strings = []
         for tl in token_list:
-            if self.end_seq_condition(tl[-1]):
-                tl = tl[:-1]
-            final_strings.append(''.join(tl))
+            tmp_tl = tl
+            for ind, t in enumerate(tl):
+                if self.end_seq_condition(tl[ind]):
+                    tmp_tl = tl[:ind]
+                    break
+            final_strings.append(''.join(tmp_tl))
         return final_strings
 
     def encode_context(self, context, text_spans_bpe):
@@ -86,6 +90,7 @@ class Roberta():
             # For now, we prune the context
             context = context[:-10]
             context_encoded = self.encode_context(context, text_spans_bpe)
+        return context_encoded
 
     def get_mask(self):
         return self.task.source_dictionary.index(self.mask)
@@ -119,11 +124,6 @@ class Roberta():
                 idxs.append(masked_idx)
             batches.append((torch.stack(encs), idxs))
         return batches, samples
-
-    def get_bpe_val(self, ind):
-        bpe = self.task.source_dictionary[ind]
-        val = self.bpe.decode(bpe)
-        return val
 
     def decode_naive(self, batch):
         tens, idxs = batch

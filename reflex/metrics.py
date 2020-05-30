@@ -11,33 +11,71 @@ import string
 import collections
 import pandas as pd
 
-def calculate_final_em_f1(per_relation_metricss):
+
+def calculate_final_em_f1_dev(per_relation_metricss, ls, expands):
     final_per_relation_metrics = {}
-    for per_relation_metrics in per_relation_metricss:
+    for l, per_relation_metrics, expand in zip(ls, per_relation_metricss, expands):
         for relation in per_relation_metrics:
             if relation not in final_per_relation_metrics:
-                final_per_relation_metrics[relation] = per_relation_metrics[relation]
+                final_per_relation_metrics[relation] = (l, expand, per_relation_metrics[relation])
                 continue
             else:
                 # report metrics for best lambda per relation
-                if final_per_relation_metrics[relation]['f1'] < per_relation_metrics[relation]['f1']:
-                    final_per_relation_metrics[relation] = per_relation_metrics[relation]
+                if final_per_relation_metrics[relation][2]['f1'] < per_relation_metrics[relation]['f1']:
+                    final_per_relation_metrics[relation] = (l, expand, per_relation_metrics[relation])
 
-    final_em = np.average(np.array([final_per_relation_metrics[s]['em'] for s in final_per_relation_metrics]))
-    final_f1 = np.average(np.array([final_per_relation_metrics[s]['f1'] for s in final_per_relation_metrics]))
+    final_em = np.average(np.array([final_per_relation_metrics[s][2]['em'] for s in final_per_relation_metrics]))
+    final_f1 = np.average(np.array([final_per_relation_metrics[s][2]['f1'] for s in final_per_relation_metrics]))
     return final_em, final_f1, final_per_relation_metrics
 
+def get_error_type_qa(gold, pred, f1):
+    gold = get_tokens(gold)
+    pred = get_tokens(pred)
+    assert len(gold) == 1
+    if len(pred) < len(gold):
+        # occasionally the prediction gets completely cleaned (is purely punctuation)
+        # by the basic squad cleaning. In this case just skip
+        return None
+    if f1 == 0:
+        return 'no_overlap'
 
-def calculate_relation_metrics(samples, predictions, per_relation_metrics, relation):
+    gt_len = len(pred) - len(gold)
+    if gt_len == 1:
+        return 'lb_1'
+    if gt_len == 2:
+        return 'lb_2'
+    if gt_len == 3:
+        return 'lb_3'
+    return 'lb_4'
+
+def get_error_type_reflex(gold, pred, f1):
+    gold = get_tokens(gold)
+    pred = get_tokens(pred)
+    if len(gold) == 0:
+        return 'should_reject'
+    if len(pred) == 0:
+        return 'should_accept'
+    if f1 == 0:
+        return 'no_overlap'
+    return 'span_mismatch'
+
+def calculate_relation_metrics(samples, predictions, per_relation_metrics, relation, single_error_list, reflex_e_list):
     relation_em = relation_f1 = 0
+    re_list = []
     for sample, prediction in zip(samples, predictions):
         em, f1 = calculate_em_f1(sample.tail, prediction)
+        if single_error_list is not None and em == 0:
+            res = get_error_type_qa(sample.tail, prediction, f1)
+            single_error_list.append(res)
+        if reflex_e_list and em == 0:
+            res = get_error_type_reflex(sample.tail, prediction, f1)
+            re_list.append(res)
         relation_em += em
         relation_f1 += f1
     relation_em /= len(samples)
     relation_f1 /= len(samples)
     per_relation_metrics[relation['relation']] = {'em': relation_em, 'f1': relation_f1}
-    return relation_em, relation_f1, per_relation_metrics
+    return relation_em, relation_f1, per_relation_metrics, single_error_list, re_list
 
 def _print_top_k(value_max_probs, index_max_probs, vocab, mask_topk, index_list, max_printouts = 10):
     result = []
@@ -209,9 +247,6 @@ def calculate_em_f1_zsre(target, prediction, anchor=None):
         is_error = 0
     
         return em, f1, is_error, no_overlap, larger_by_1, larger_by_2, larger_by_3, larger_by_4, larger_by_5_or_more
-
-
-
 
 
 def get_ranking(log_probs, masked_indices, vocab, is_masked_probs=False, label_index = None, index_list = None, topk = 1000, P_AT = 10, print_generation=True, return_masked_topk=False):

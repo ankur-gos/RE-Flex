@@ -27,13 +27,23 @@ class ReflexRunner:
                  l, 
                  we_model,
                  spacy_model,
-                 k):
+                 k,
+                 expand,
+                 hyperparams=None):
         self.context_filter = WordEmbeddingsPMIFilter(we_model, spacy_model, l)
         self.model = Reflex(model_dir, model_name, device, k, self.context_filter.nlp)
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
         self.batch_size = batch_size
         self.must_choose_answer = must_choose_answer # For datasets where there is always an answer, setting this to true will ensure that QA models that can return "answer doesn't exist" will always return a span in the context
+        self.hyperparams = hyperparams
+        self.expand = expand
+        self.override_expand = False
+        self.e_list = []
+        self.override_l = False
+    
+    def update_l(self, l):
+        self.context_filter = WordEmbeddingsPMIFilter(self.context_filter.word_emb, self.context_filter.nlp, l)
 
     def predict(self):
         # Load relations file
@@ -42,6 +52,13 @@ class ReflexRunner:
         aggregate_em = aggregate_f1 = 0
         per_relation_metrics = {}
         for relation in relations:
+            # Check for per relation tuned hyperparams
+            if self.hyperparams is not None:
+                l, expand, _ = self.hyperparams[relation['relation']]
+                if not self.override_l:
+                    self.update_l(l)
+                if not self.override_expand:
+                    self.expand = expand
             data_file = os.path.join(self.data_directory, relation['relation']) + '.jsonl'
             data = load_file(data_file)
             # Adding to set filters any accidental duplicates
@@ -67,7 +84,7 @@ class ReflexRunner:
                 batches, samples = self.model.batch(samples, self.batch_size)
                 print('Starting inference')
                 for batch in tqdm(batches):
-                    results = self.model.predict(batch)
+                    results = self.model.predict(batch, self.expand)
                     all_results.extend(results)
             else:
                 print('All samples were filtered. Skipping inference.')
@@ -78,7 +95,8 @@ class ReflexRunner:
             # Predict empty string for every sample
             filtered_predictions = [''] * len(filtered_samples)
             all_results.extend(filtered_predictions)
-            relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, all_results, per_relation_metrics, relation)
+            relation_em, relation_f1, per_relation_metrics, _, relation_e_list  = calculate_relation_metrics(samples, all_results, per_relation_metrics, relation, single_error_list=None, reflex_e_list=True)
+            self.e_list.extend(relation_e_list)
             aggregate_em += relation_em
             aggregate_f1 += relation_f1
         aggregate_em /= len(relations)

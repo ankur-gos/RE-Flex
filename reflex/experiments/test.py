@@ -21,8 +21,8 @@ def conf():
     batch_size = 16
     must_choose_answer = False
     device = 'cpu'
-    ls = [-3, -2, -1, -0.5, 0, 0.5, 1, 2, 3]
-    k = 2
+    ls = [0]
+    k = 16
     word_embeddings_path = os.path.join(os.environ['BASE_PATH'], 'weights/crawl-300d-2M-subword.bin')
 
 @ex.automain

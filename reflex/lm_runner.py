@@ -15,12 +15,13 @@ from tqdm import tqdm
 
 
 class LMRunner:
-    def __init__(self, model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer):
+    def __init__(self, model_dir, model_name, device, relations_filepath, data_directory, batch_size, must_choose_answer, cap):
         self.model = Roberta(model_dir, model_name, device)
         self.relations_filepath = relations_filepath # path to relations file
         self.data_directory = data_directory # data directory path
         self.batch_size = batch_size
         self.must_choose_answer = must_choose_answer # For datasets where there is always an answer, setting this to true will ensure that QA models that can return "answer doesn't exist" will always return a span in the context
+        self.cap = cap
 
     def predict_naive(self, use_context):
         # Load relations file
@@ -45,9 +46,9 @@ class LMRunner:
             batches, samples = self.model.batch(samples, self.batch_size)
             all_results = []
             for batch in tqdm(batches):
-                results = self.model.decode_lm(batch, 20)
+                results = self.model.decode_lm(batch, self.cap)
                 all_results.extend(results)
-            relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, all_results, per_relation_metrics, relation)
+            relation_em, relation_f1, per_relation_metrics, _, _= calculate_relation_metrics(samples, all_results, per_relation_metrics, relation, single_error_list=None, reflex_e_list=False)
             aggregate_em += relation_em
             aggregate_f1 += relation_f1
         aggregate_em /= len(relations)

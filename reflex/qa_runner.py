@@ -23,7 +23,7 @@ def to_list(tensor):
     return tensor.detach().cpu().tolist()
 
 class QARunner:
-    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device, trained_to_reject):
+    def __init__(self, qa_path, relations_filepath, data_directory, batch_size, must_choose_answer, device, trained_to_reject, calculate_single_error=True):
         self.trained_to_reject = trained_to_reject
         self.qa_path = qa_path # path to qa weights
         self.relations_filepath = relations_filepath # path to relations file
@@ -35,6 +35,11 @@ class QARunner:
 
         self.batch_size = batch_size
         self.must_choose_answer = must_choose_answer # For datasets where there is always an answer, setting this to true will ensure that QA models that can return "answer doesn't exist" will always return a span in the context
+        self.total_samples = 0
+        if calculate_single_error:
+            self.se_list = []
+        else:
+            self.se_list = None
 
     def predict(self):
         # Load relations file
@@ -112,10 +117,12 @@ class QARunner:
                 verbose_logging,
                 self.trained_to_reject, null_score_diff_threshold, must_choose_answer=self.must_choose_answer)
             predictions = [predictions[p] for p in predictions]
-            relation_em, relation_f1, per_relation_metrics = calculate_relation_metrics(samples, predictions, per_relation_metrics, relation)
+            self.total_samples += len(predictions)
+            relation_em, relation_f1, per_relation_metrics, self.se_list, _ = calculate_relation_metrics(samples, predictions, per_relation_metrics, relation, self.se_list, False)
             aggregate_em += relation_em
             aggregate_f1 += relation_f1
         aggregate_em /= len(relations)
         aggregate_f1 /= len(relations)
         return aggregate_em, aggregate_f1, per_relation_metrics
+
 

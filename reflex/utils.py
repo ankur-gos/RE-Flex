@@ -3,6 +3,27 @@ from dataclasses import dataclass
 from sacred import Experiment
 from sacred.observers import MongoObserver, SlackObserver
 import os
+import pandas as pd
+
+def save_se_list(se_list, filename):
+    s = pd.Series(pd.Categorical(se_list, categories=['no_overlap', 'lb_1', 'lb_2', 'lb_3', 'lb_4']))
+    result = s.value_counts(normalize=True)
+    result.to_csv(filename)
+
+def save_reflex_e_list(e_list, filename):
+    s = pd.Series(pd.Categorical(e_list, categories=['should_reject', 'should_accept', 'no_overlap', 'span_mismatch']))
+    result = s.value_counts(normalize=True)
+    result.to_csv(filename)
+
+def get_bpe_val(ind, source_dictionary, bpe_obj):
+    bpe = source_dictionary[ind]
+    try:
+        _ = int(bpe)
+    except ValueError:
+        return bpe
+    val = bpe_obj.decode(bpe)
+    return val
+
 
 def setup_experiment(experiment_name):
     mongo_uri = 'mongodb://mongo_user:mongo_password@localhost:27017/sacred?authSource=admin'

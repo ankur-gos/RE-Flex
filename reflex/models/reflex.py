@@ -2,13 +2,15 @@
 RE-Flex model
 """
 
-from reflex.utils import chunks
+from reflex.utils import chunks, get_bpe_val
 from fairseq.models.roberta import RobertaModel, alignment_utils
+import string
 import torch
 import torch.nn.functional as F
 from spacy.tokenizer import Tokenizer
 from collections import defaultdict
 import numpy as np
+import string
 
 class Reflex():
     def __init__(self, model_dir, model_name, device, k, spacy_model):
@@ -23,27 +25,28 @@ class Reflex():
         self.period = '.'
         self.k = k
         self.nlp = spacy_model
-        self.tokenizer = Tokenizer(self.nlp.vocab)
+        self.tokenizer = self.nlp.Defaults.create_tokenizer(self.nlp)
+        self.filter_tokens = list(string.punctuation) # List of tokens to filter in topk
+        #self.alpha = torch.from_numpy(np.array(alpha)).float().to(device)
 
-    def predict(self, batch):
+    def predict(self, batch, expand_token):
         _, mask_idxs, context_lengths, spacy_tokenss, alignments = batch
         batched_p_B_theta = self.compute_p_B_theta(batch)
         predictions = []
         for ind, unnormalized_p_B_theta in enumerate(batched_p_B_theta):
             p_B_theta = F.softmax(unnormalized_p_B_theta, dim=0)
             p_B, fixed_vals = torch.topk(p_B_theta.squeeze(), k=self.k, dim=0)
+            p_B, fixed_vals = self.filter_vals(p_B, fixed_vals)
             prepared_fixed_batch = self.prepare_fixed_batch(batch, ind, fixed_vals)
             features = self.compute_batch_features(prepared_fixed_batch)
             context_length = context_lengths[ind]
             alignment = alignments[ind]
-            spacy_tokens = spacy_tokenss[ind]
-            # Filter punctuation and stop words from D
+            spacy_tokens, decoded_context = spacy_tokenss[ind]
+            doc = self.nlp(decoded_context)
+            if len(spacy_tokens) != len(doc):
+                raise Exception('weird length mismatch. check tokenizers')
             valid_inds = []
             for st_ind, tok in enumerate(spacy_tokens):
-                #if self.nlp.vocab[tok].is_stop or self.nlp.vocab[tok].is_punct:
-                #    continue
-                #if self.nlp.vocab[tok].is_punct:
-                #    continue
                 valid_inds.append(st_ind)
 
             mask_idx = mask_idxs[ind]
@@ -53,17 +56,83 @@ class Reflex():
                 feat = features[p_ind].squeeze()
                 context_features = feat[:context_length, :] # num_spacy_tokens x C
                 context_features = self.align_features_to_words(context_features, alignment)[1:, :] # chop off the start sentence token
-                #import ipdb
-                #ipdb.set_trace()
                 context_features = torch.index_select(context_features, dim=0, index=valid_inds)
                 mask_features = feat[mask_idx].repeat(context_features.shape[0], 1)
                 p_D_given_b = F.cosine_similarity(context_features, mask_features, dim=1)
                 p_D_given_b = F.softmax(p_D_given_b, dim=0)
                 # Marginalize
                 p_D += p_D_given_b * p_b
+            #p_D = p_D * self.get_word_probs(doc) #self.alpha * p_D + (1 - self.alpha) * self.get_word_probs(doc)
             map_ind = torch.argmax(p_D, dim=0)
-            predictions.append(spacy_tokens[map_ind])
+            if expand_token:
+                expand_pred = self.expand_token(doc, map_ind)
+                predictions.append(expand_pred)
+            else:
+                predictions.append(spacy_tokens[map_ind])
         return predictions
+
+    def get_word_probs(self, doc):
+        probs = [(1 - t.prob) for t in doc]
+        return torch.from_numpy(np.array(probs)).float().to(self.device)
+
+    def expand_token(self, doc, anchor_ind):
+        if anchor_ind > len(doc):
+            import ipdb
+            ipdb.set_trace()
+        word = doc[anchor_ind]
+        iob = word.ent_iob_
+        l, r = None, None
+        if iob == 'O':
+            return word.text
+        elif iob == 'B':
+            ind = anchor_ind+1
+            if ind == len(doc):
+                return word.text
+            while True:
+                if ind == len(doc):
+                    break
+                w2 = doc[ind]
+                if w2.ent_iob_ == 'O':
+                    l = ind
+                    break
+                ind += 1
+        else:
+            ind = anchor_ind-1
+            while True:
+                w2 = doc[ind]
+                if w2.ent_iob_ == 'B':
+                    l = ind
+                    break
+                ind -= 1
+            ind = anchor_ind+1
+            if ind == len(doc):
+                r = anchor_ind
+            else:
+                while True:
+                    if ind == len(doc):
+                        break
+                    w2 = doc[ind]
+                    if w2.ent_iob_ == 'O':
+                        r = ind
+                        break
+                    ind += 1
+        if l is None:
+            result = doc[anchor_ind:r]
+            return result.text
+        result = doc[l:r]
+        return result.text
+
+    def filter_vals(self, p_B, fixed_vals):
+        inds = []
+        fvs = []
+        for ind, fv in enumerate(fixed_vals):
+            val = get_bpe_val(fv, self.task.source_dictionary, self.bpe).strip()
+            if val not in self.filter_tokens:
+                inds.append(ind)
+                fvs.append(fv)
+        inds = torch.from_numpy(np.array(inds)).long().to(device=self.device)
+        p_B_new = torch.index_select(p_B, dim=0, index=inds)
+        return p_B_new, fvs
 
     def prepare_fixed_batch(self, batch, batch_ind, fixed_vals):
         tens, mask_idxs, _, _, _ = batch
@@ -71,6 +140,9 @@ class Reflex():
         mask_idx = mask_idxs[batch_ind][0][0]
         fixed_batch = []
         for fv in fixed_vals:
+            val = get_bpe_val(fv, self.task.source_dictionary, self.bpe).strip()
+            if val in self.filter_tokens:
+                continue
             fixed_sample = sample.clone().squeeze()
             fixed_sample[mask_idx] = fv
             fixed_batch.append(fixed_sample)
@@ -135,16 +207,16 @@ class Reflex():
         context_encoded = self.task.source_dictionary.encode_line(text_spans_context, append_eos=False)
         # Sometimes the source dictionary decodes the unicode differently than spacy
         # so we use the decoded context instead of the original context
-        decoded = [self.get_bpe_val(i) for i in context_encoded[1:]]
+        decoded = [get_bpe_val(i, self.task.source_dictionary, self.bpe) for i in context_encoded[1:]]
         decoded_context = ''.join(decoded)
         decoded = [i.strip() for i in decoded]
-        spacy_tokens = [t.text.strip() for t in self.tokenizer(decoded_context)]
+        spacy_tokens = [t.text.strip() for t in self.nlp(decoded_context)]
         if ''.join(decoded) != ''.join(spacy_tokens):
             import ipdb
             ipdb.set_trace()
         alignment = self.align_bpe_to_words(decoded, spacy_tokens)
 
-        return len(context_encoded), spacy_tokens, alignment
+        return len(context_encoded), (spacy_tokens, decoded_context), alignment
 
     def encode_context(self, context, text_spans_bpe):
         context_spans = self.bpe.encode(context)
@@ -208,10 +280,6 @@ class Reflex():
             batches.append((torch.stack(encs), idxs, context_lengths, spacy_tokenss, alignments))
         return batches, samples
 
-    def get_bpe_val(self, ind):
-        bpe = self.task.source_dictionary[ind]
-        val = self.bpe.decode(bpe)
-        return val
 
     def compute_batch_features(self, batch):
         batch = batch.long().to(device=self.device)
