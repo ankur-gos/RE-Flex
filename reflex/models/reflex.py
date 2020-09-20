@@ -3,6 +3,7 @@ RE-Flex model
 """
 
 from reflex.utils import chunks, get_bpe_val
+from reflex.structs import Sample
 from fairseq.models.roberta import RobertaModel, alignment_utils
 import string
 import torch
@@ -28,6 +29,12 @@ class Reflex():
         self.tokenizer = self.nlp.Defaults.create_tokenizer(self.nlp)
         self.filter_tokens = list(string.punctuation) # List of tokens to filter in topk
         #self.alpha = torch.from_numpy(np.array(alpha)).float().to(device)
+
+    def predict_one(self, context, entity, template, expand=True):
+        sample = [Sample(entity, context, template)]
+        batches, _ = self.batch(sample, 1)
+        batch = batches[0]
+        return self.model.predict(batch, expand)
 
     def predict(self, batch, expand_token):
         _, mask_idxs, context_lengths, spacy_tokenss, alignments = batch
