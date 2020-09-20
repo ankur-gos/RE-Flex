@@ -5,6 +5,7 @@ data/
 *$py.class
 *.pkl
 weights/
+.idea/
 
 # Swap files
 *.swp
