@@ -1,7 +1,10 @@
 # Byte-compiled / optimized / DLL files
 __pycache__/
+data/
 *.py[cod]
 *$py.class
+*.pkl
+weights/
 
 # Swap files
 *.swp
