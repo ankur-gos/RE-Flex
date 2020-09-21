@@ -59,8 +59,6 @@ class Roberta():
                     t.append(new_tok)
                 i += 1
 
-        #import ipdb
-        #ipdb.set_trace()
         final_strings = []
         for tl in token_list:
             tmp_tl = tl

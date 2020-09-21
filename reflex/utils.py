@@ -4,6 +4,7 @@ from sacred import Experiment
 from sacred.observers import MongoObserver, SlackObserver
 import os
 import pandas as pd
+from reflex.structs import Sample
 
 def save_se_list(se_list, filename):
     s = pd.Series(pd.Categorical(se_list, categories=['no_overlap', 'lb_1', 'lb_2', 'lb_3', 'lb_4']))
@@ -34,6 +35,7 @@ def setup_experiment(experiment_name):
     ex.observers.append(slack_obs)
     return ex
 
+
 def load_file(filename):
     data = []
     with open(filename, "r") as f:
@@ -41,8 +43,23 @@ def load_file(filename):
             data.append(json.loads(line.strip()))
     return data
 
+
+def load_samples_from_file(filename, template):
+    data = load_file(filename)
+    samples = []
+    for d in data:
+        if 'object' in d:
+            obj = d['object']
+        else:
+            obj = None
+        sample = Sample(d['subject'], d['context'], obj, None, template)
+        samples.append(sample)
+    return samples
+
+
 def to_list(tensor):
     return tensor.detach().cpu().tolist()
+
 
 def chunks(lst, n):
     """Yield successive n-sized chunks from lst."""

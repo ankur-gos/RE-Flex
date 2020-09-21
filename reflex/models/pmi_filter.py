@@ -1,23 +1,23 @@
 import numpy as np
-import fasttext
-import sqlite3
-import random
 from scipy.stats import norm
 import spacy
-import json
-from collections import Counter
-from sklearn.mixture import GaussianMixture
 from sklearn.metrics.pairwise import cosine_similarity
+import fasttext
+
 
 class WordEmbeddingsPMIFilter:
     def __init__(self, we_model, spacy_model, lambda_val):
         print("Loading fastext word embeddings ... ")
-        self.word_emb = we_model
-        self.filter_tokens = ['.', ',', '(', ')', '</s>', '_._', ':', '-', ',', '_..._', '_:_']
-        print("Loading spacy model ... ")
-        self.nlp = spacy_model
+        if isinstance(we_model, str):
+            self.word_emb = fasttext.load_model(we_model)
+        else:
+            self.word_emb = we_model
+        if isinstance(spacy_model, str):
+            print("Loading spacy model ... ")
+            self.nlp = spacy.load(spacy_model)
+        else:
+            self.nlp = spacy_model
         self.lambda_val = lambda_val
-        self.gmm_estimator = GaussianMixture(n_components=2) # Defaults are reasonable
 
     def estimate_pmi(self, sample):
         template = sample.template.replace('[X]', sample.head)
@@ -35,21 +35,6 @@ class WordEmbeddingsPMIFilter:
                     max_score = score
             scores.append(max_score)
         return np.average(scores)
-
-    def cluster(self, samples):
-        ms = np.asarray([self.estimate_pmi(s) for s in samples]).reshape(-1, 1)
-        est = self.gmm_estimator.fit(ms)
-        means = est.means_
-        I_c = 0 if means[0] > means[1] else 1
-        preds = est.predict(ms)
-
-        zsamples = zip(samples, ms, preds)
-        filtered_samples = []
-        for sample, m, p in zsamples:
-            if p == I_c:
-                filtered_samples.append(sample)
-        return filtered_samples
-
 
     def filter(self, samples):
         ms = np.asarray([self.estimate_pmi(s) for s in samples])

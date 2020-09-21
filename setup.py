@@ -22,6 +22,8 @@ setup(
         'torch==1.2.0',
         'torchvision==0.4.0',
         'spacy>=2.0.7',
-        'wrapt==1.10.11'
+        'wrapt==1.10.11',
+        'click>=7.1.2',
+        'scikit-learn>=0.23.2
     ]
 )

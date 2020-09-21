@@ -3,18 +3,70 @@ RE-Flex model
 """
 
 from reflex.utils import chunks, get_bpe_val
-from reflex.structs import Sample
+from reflex.structs import Sample, Triplet
 from fairseq.models.roberta import RobertaModel, alignment_utils
-import string
 import torch
 import torch.nn.functional as F
-from spacy.tokenizer import Tokenizer
 from collections import defaultdict
 import numpy as np
 import string
+import spacy
+from reflex.models.pmi_filter import WordEmbeddingsPMIFilter
+from tqdm import tqdm
+
+
+class RelationExtractor():
+    def __init__(self, model_dir, model_name, filter=False, expand=False, word_embeddings_path=None, batch_size=16, filter_threshold=0.7, device='cpu', k=16, spacy_model='en_core_web_lg'):
+        self.nlp = spacy.load(spacy_model)
+        if filter:
+            if word_embeddings_path is None:
+                raise ValueError('word_embeddings_path cannot be None is filter is True')
+
+            self.filter_model = WordEmbeddingsPMIFilter(word_embeddings_path, self.nlp, filter_threshold)
+        else:
+            self.filter_model = None
+
+        self.reflex = Reflex(model_dir, model_name, device, k, self.nlp)
+        self.batch_size = batch_size
+        self.expand = expand
+
+    def extract(self, samples, relation_name):
+        samples_set = set()
+        for sample in samples:
+            samples_set.add(sample)
+        samples = list(samples)
+        if self.filter_model is not None:
+            init_len = len(samples)
+            print('Starting filtering')
+            samples = self.filter_model.filter(samples)
+            final_len = len(samples)
+            print(f'Filtering finished. Filtered {init_len - final_len} samples.')
+
+        all_results = []
+        if final_len != 0:
+            print('Batching samples')
+            batches, samples = self.reflex.batch(samples, self.batch_size)
+            print('Starting inference')
+            for batch in tqdm(batches):
+                results = self.reflex.predict(batch, self.expand, check_before=True)
+                all_results.extend(results)
+        else:
+            print('All samples were filtered. Skipping inference.')
+
+        filtered_samples = [s for s in samples_set if s not in samples]
+        samples = list(samples)
+        samples.extend(filtered_samples)
+        # Predict empty string for every sample
+        filtered_predictions = [''] * len(filtered_samples)
+        all_results.extend(filtered_predictions)
+        triplets = []
+        for sample, result in zip(samples, all_results):
+            triplets.append(Triplet(sample.head, relation_name, result if result != '' else None, sample.context))
+        return triplets
+
 
 class Reflex():
-    def __init__(self, model_dir, model_name, device, k, spacy_model):
+    def __init__(self, model_dir, model_name, device='cpu', k=16, spacy_model='en_core_web_lg'):
         self.model = RobertaModel.from_pretrained(model_dir, checkpoint_file=model_name)
         self.model.to(device=device)
         self.device = device
@@ -25,18 +77,21 @@ class Reflex():
         self.start_sentence = "<s>"
         self.period = '.'
         self.k = k
-        self.nlp = spacy_model
+        if isinstance(spacy_model, str):
+            self.nlp = spacy.load(spacy_model)
+        else:
+            self.nlp = spacy_model
         self.tokenizer = self.nlp.Defaults.create_tokenizer(self.nlp)
         self.filter_tokens = list(string.punctuation) # List of tokens to filter in topk
         #self.alpha = torch.from_numpy(np.array(alpha)).float().to(device)
 
-    def predict_one(self, context, entity, template, expand=True):
-        sample = [Sample(entity, context, template)]
+    def predict_one(self, context, entity, template, expand=False, check_before=True):
+        sample = [Sample(entity, context, None, None, template)]
         batches, _ = self.batch(sample, 1)
         batch = batches[0]
-        return self.model.predict(batch, expand)
+        return self.predict(batch, expand, check_before=check_before)
 
-    def predict(self, batch, expand_token):
+    def predict(self, batch, expand_token, check_before=False):
         _, mask_idxs, context_lengths, spacy_tokenss, alignments = batch
         batched_p_B_theta = self.compute_p_B_theta(batch)
         predictions = []
@@ -71,11 +126,17 @@ class Reflex():
                 p_D += p_D_given_b * p_b
             #p_D = p_D * self.get_word_probs(doc) #self.alpha * p_D + (1 - self.alpha) * self.get_word_probs(doc)
             map_ind = torch.argmax(p_D, dim=0)
+            # If it predicts the punctuation, usually it means the word before it because of RoBERTa tokenization.
+            # This is NOT set to True in the experiments, but it usually improves output at inference time
+            if check_before:
+                if spacy_tokens[map_ind] in self.filter_tokens:
+                    map_ind = map_ind - 1 if map_ind != 0 else map_ind
             if expand_token:
                 expand_pred = self.expand_token(doc, map_ind)
                 predictions.append(expand_pred)
             else:
                 predictions.append(spacy_tokens[map_ind])
+
         return predictions
 
     def get_word_probs(self, doc):
@@ -86,48 +147,12 @@ class Reflex():
         if anchor_ind > len(doc):
             import ipdb
             ipdb.set_trace()
+        ents = doc.ents
         word = doc[anchor_ind]
-        iob = word.ent_iob_
-        l, r = None, None
-        if iob == 'O':
-            return word.text
-        elif iob == 'B':
-            ind = anchor_ind+1
-            if ind == len(doc):
-                return word.text
-            while True:
-                if ind == len(doc):
-                    break
-                w2 = doc[ind]
-                if w2.ent_iob_ == 'O':
-                    l = ind
-                    break
-                ind += 1
-        else:
-            ind = anchor_ind-1
-            while True:
-                w2 = doc[ind]
-                if w2.ent_iob_ == 'B':
-                    l = ind
-                    break
-                ind -= 1
-            ind = anchor_ind+1
-            if ind == len(doc):
-                r = anchor_ind
-            else:
-                while True:
-                    if ind == len(doc):
-                        break
-                    w2 = doc[ind]
-                    if w2.ent_iob_ == 'O':
-                        r = ind
-                        break
-                    ind += 1
-        if l is None:
-            result = doc[anchor_ind:r]
-            return result.text
-        result = doc[l:r]
-        return result.text
+        for ent in ents:
+            if ent.start <= anchor_ind <= ent.end:
+                return ent.text
+        return word.text
 
     def filter_vals(self, p_B, fixed_vals):
         inds = []
